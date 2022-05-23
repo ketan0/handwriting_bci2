@@ -1,3 +1,5 @@
+modelName: gru
+
 #number of units in each GRU layer
 nUnits: 512
 
