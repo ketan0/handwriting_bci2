@@ -1,0 +1,41 @@
+modelName: conformer
+
+#all input layers project down to this number of units before fanning out again into the conformer
+inputLayerSize: 16
+
+# Factor for subsampling conformer final outputs (should be >= 4)
+subsampleFactor: 4
+
+#l2 regularization cost
+weightReg: 1e-5
+
+# dimension of conformer block outputs
+encoderDim: 8
+
+# number of conformer blocks in conformer
+# numEncoderLayers: 17
+numEncoderLayers: 2
+
+# number of attention heads in each multi-head attention layer of conformer
+numAttentionHeads: 8
+
+# expansion factor in hidden units of feed-forward module
+feedForwardExpansionFactor: 4
+
+# expansion factor in filters of conv modules
+convExpansionFactor: 2
+
+# dropout applied to inputs
+inputDropout: 0.1
+
+# dropout applied in feed-forward module
+feedForwardDropout: 0.1
+
+# dropout applied in attention module
+attentionDropout: 0.1
+
+# dropout applied in conv module
+convDropout: 0.1
+
+# conv kernel size
+convKernelSize: 31
