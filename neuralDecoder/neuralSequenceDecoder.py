@@ -7,6 +7,7 @@ import scipy.io
 import scipy.special
 import tensorflow as tf
 from omegaconf import OmegaConf
+import wandb
 
 import neuralDecoder.lrSchedule as lrSchedule
 import neuralDecoder.models as models
@@ -449,23 +450,37 @@ class NeuralSequenceDecoder(object):
                                               minibatchOutput['gradNorm'] if isTrainBatch else 0.0])
 
         prefix = 'train' if isTrainBatch else 'val'
-        with self.summary_writer.as_default():
-            if isTrainBatch:
-                tf.summary.scalar(
-                    f'{prefix}/predictionLoss', minibatchOutput['predictionLoss'], step=batchIdx)
-                tf.summary.scalar(
-                    f'{prefix}/regLoss', minibatchOutput['regularizationLoss'], step=batchIdx)
-                tf.summary.scalar(f'{prefix}/gradNorm',
-                                  minibatchOutput['gradNorm'], step=batchIdx)
-            tf.summary.scalar(f'{prefix}/seqErrorRate',
-                              minibatchOutput['seqErrorRate'], step=batchIdx)
-            tf.summary.scalar(f'{prefix}/computationTime',
-                              computationTime, step=batchIdx)
-            if isTrainBatch:
-                tf.summary.scalar(
-                    f'{prefix}/lr', self.optimizer._decayed_lr(tf.float32), step=batchIdx)
+        metrics = {}
+        if isTrainBatch:
+            metrics.update({
+                f'{prefix}/predictionLoss': minibatchOutput['predictionLoss'],
+                f'{prefix}/regLoss': minibatchOutput['regularizationLoss'],
+                f'{prefix}/gradNorm': minibatchOutput['gradNorm'],
+                f'{prefix}/lr': self.optimizer._decayed_lr(tf.float32),
+            })
+        metrics.update({
+            f'{prefix}/seqErrorRate': minibatchOutput['seqErrorRate'],
+            f'{prefix}/computationTime': computationTime,
+            'step': batchIdx
+        })
+        wandb.log(**metrics)
 
-    @tf.function()
+        # with self.summary_writer.as_default():
+        #     if isTrainBatch:
+        #         tf.summary.scalar(
+        #             f'{prefix}/predictionLoss', minibatchOutput['predictionLoss'], step=batchIdx)
+        #         tf.summary.scalar(
+        #             f'{prefix}/regLoss', minibatchOutput['regularizationLoss'], step=batchIdx)
+        #         tf.summary.scalar(f'{prefix}/gradNorm',
+        #                           minibatchOutput['gradNorm'], step=batchIdx)
+        #     tf.summary.scalar(f'{prefix}/seqErrorRate',
+        #                       minibatchOutput['seqErrorRate'], step=batchIdx)
+        #     tf.summary.scalar(f'{prefix}/computationTime',
+        #                       computationTime, step=batchIdx)
+        #     if isTrainBatch:
+        #         tf.summary.scalar(
+        #             f'{prefix}/lr', self.optimizer._decayed_lr(tf.float32), step=batchIdx)
+
     def _trainStep(self, datasetIdx, layerIdx):
         #loss function & regularization
         data = tf.switch_case(datasetIdx, self.trainDatasetSelector)
