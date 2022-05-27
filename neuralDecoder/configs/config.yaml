@@ -81,8 +81,8 @@ inputLayerForInference:
 #gradient to keep things reasonable
 gradClipValue: 10
 
-#can do CTC loss or cross-entropy loss
-lossType: ctc #ctc or ce
+#can do CTC loss, RNN-T, or cross-entropy loss
+lossType: ctc #ctc, rnnt, or ce
 
 # Whether to use train data mean and std for normalization
 normLayer: False

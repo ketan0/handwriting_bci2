@@ -11,6 +11,7 @@ module load cuda/11.2.0 cudnn/8.1.1.33
 
 python -m neuralDecoder.main \
     model=conformer \
+    lossType=rnnt \
     dataset=handwriting_all_days \
     batchSize=48 \
     dataset.syntheticMixingRate=0 \
