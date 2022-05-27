@@ -1,4 +1,5 @@
 import os
+import math
 import random
 from datetime import datetime
 
@@ -7,6 +8,11 @@ import scipy.io
 import scipy.special
 import tensorflow as tf
 from omegaconf import OmegaConf
+from tensorflow_asr.configs.config import Config
+from tensorflow_asr.featurizers.text_featurizers import CharFeaturizer
+from tensorflow_asr.models.transducer.conformer import Conformer
+from tensorflow_asr.losses.rnnt_loss import RnntLoss
+from tensorflow_asr.utils import data_util
 
 import neuralDecoder.lrSchedule as lrSchedule
 import neuralDecoder.models as models
@@ -49,28 +55,20 @@ class NeuralSequenceDecoder(object):
                             self.args['dataset']['nClasses'] + 1,
                             self.args['model']['bidirectional'],
                             self.args['model']['dropout'])
+            self.model(tf.keras.Input(shape=(None, self.args['model']['inputLayerSize'])))
+            self.model.summary()
         elif self.args['model']['modelName'] == 'conformer':
-            self.model = models.Conformer(
-                self.args['dataset']['nClasses'],
-                self.args['model']['encoderDim'],
-                self.args['model']['numEncoderLayers'],
-                self.args['model']['numAttentionHeads'],
-                self.args['model']['feedForwardExpansionFactor'],
-                self.args['model']['convExpansionFactor'],
-                self.args['model']['inputDropout'],
-                self.args['model']['feedForwardDropout'],
-                self.args['model']['attentionDropout'],
-                self.args['model']['convDropout'],
-                self.args['model']['convKernelSize'],
-                self.args['model']['subsampleFactor']
-            )
+            config = Config(models.CONFORMER_CONFIG)
+            self.model = Conformer(**config.model_config,
+                                   vocabulary_size=args['dataset']['nClasses'] + 1)
+            self.model.text_featurizer = CharFeaturizer(config.decoder_config)
+            self.model.make((None, self.args['model']['inputLayerSize'], 1))
+            self.model.summary()
+            self.rnnt_loss = RnntLoss(blank=self.args['model']['blankToken'], global_batch_size=self.args['batchSize'])
         else:
             raise Exception(f'Received unknown model name: {self.args["model"]["modelName"]}')
 
-        self.model(tf.keras.Input(shape=(8, self.args['model']['inputLayerSize']),
-                                  batch_size=4))
         self.model.trainable = self.args['model'].get('trainable', True)
-        self.model.summary()
 
         self._prepareForTraining()
 
@@ -359,9 +357,11 @@ class NeuralSequenceDecoder(object):
 
                 #save a snapshot of key RNN outputs/variables so an outside program can plot them if desired
                 outputSnapshot = {}
-                outputSnapshot['logitsSnapshot'] = trainOut['logits'][0, :, :].numpy()
-                outputSnapshot['rnnUnitsSnapshot'] = trainOut['rnnUnits'][0, :, :].numpy(
-                )
+                # TODO: fix this
+                # outputSnapshot['logitsSnapshot'] = trainOut['logits'][0, :, :].numpy()
+                if self.args['model']['modelName'] == 'gru':
+                    outputSnapshot['rnnUnitsSnapshot'] = trainOut['rnnUnits'][0, :, :].numpy(
+                    )
                 outputSnapshot['inputFeaturesSnapshot'] = trainOut['inputFeatures'][0, :, :].numpy(
                 )
                 #outputSnapshot['classLabelsSnapshot'] = trainOut['classLabels'][0, :, :].numpy(
@@ -417,13 +417,14 @@ class NeuralSequenceDecoder(object):
                 if returnData:
                     allData.append(data)
 
+        # TODO: fix this
         # Logits have different length
-        infOut['logits'] = [l for batch in infOut['logits'] for l in list(batch)]
-        maxLogitLength = max([l.shape[0] for l in infOut['logits']])
-        infOut['logits'] = [np.pad(l, [[0, maxLogitLength-l.shape[0]], [0, 0]]) for l in infOut['logits']]
-        infOut['logits'] = np.stack(infOut['logits'], axis=0)
+        # infOut['logits'] = [l for batch in infOut['logits'] for l in list(batch)]
+        # maxLogitLength = max([l.shape[0] for l in infOut['logits']])
+        # infOut['logits'] = [np.pad(l, [[0, maxLogitLength-l.shape[0]], [0, 0]]) for l in infOut['logits']]
+        # infOut['logits'] = np.stack(infOut['logits'], axis=0)
 
-        infOut['logitLengths'] = np.concatenate(infOut['logitLengths'], axis=0)
+        # infOut['logitLengths'] = np.concatenate(infOut['logitLengths'], axis=0)
         infOut['decodedSeqs'] = np.concatenate(infOut['decodedSeqs'], axis=0)
         infOut['editDistances'] = np.concatenate(
             infOut['editDistances'], axis=0)
@@ -465,7 +466,7 @@ class NeuralSequenceDecoder(object):
                 tf.summary.scalar(
                     f'{prefix}/lr', self.optimizer._decayed_lr(tf.float32), step=batchIdx)
 
-    @tf.function()
+    # TODO: re-add tf.function decorator
     def _trainStep(self, datasetIdx, layerIdx):
         #loss function & regularization
         data = tf.switch_case(datasetIdx, self.trainDatasetSelector)
@@ -483,10 +484,29 @@ class NeuralSequenceDecoder(object):
             inputTransformedFeatures = tf.switch_case(
                 layerIdx, inputTransformSelector)
             # tf.print('input shape:', tf.shape(inputTransformedFeatures))
-            predictions = self.model(inputTransformedFeatures, training=True)
+            if self.args['model']['modelName'] == 'conformer':
+                inputTransformedFeatures = tf.expand_dims(inputTransformedFeatures, -1)
+                inputs = data_util.create_inputs(
+                    inputs=inputTransformedFeatures,
+                    inputs_length=data['nSeqElements'],
+                    # we just prepend an additional blank to the labels
+                    # to create placeholder predictions / inputs to the predictor net
+                    predictions=tf.pad(data['seqClassIDs'],
+                                       tf.constant([[0, 0], [1, 0]]),
+                                       constant_values=self.args['model']['blankToken']),
+                    predictions_length=data['nSeqElements'] + 1,
+                )
+            elif self.args['model']['modelName'] == 'gru':
+                inputs = inputTransformedFeatures
+            else:
+                raise Exception('unexpected model type:', self.args['model']['modelName'])
+            predictions = self.model(inputs, training=True)
             # tf.print('predictions shape:', tf.shape(predictions))
-            regularization_loss = tf.math.add_n(self.model.losses) + \
-                tf.math.add_n(tf.switch_case(layerIdx, regLossSelector))
+            if self.args['model']['modelName'] == 'gru': # TODO: make a useRegularizationLoss yaml param
+                regularization_loss = tf.math.add_n(self.model.losses) + \
+                    tf.math.add_n(tf.switch_case(layerIdx, regLossSelector))
+            else:
+                regularization_loss = 0
 
             batchSize = tf.shape(data['inputFeatures'])[0]
             if self.args['lossType'] == 'ctc':
@@ -497,9 +517,8 @@ class NeuralSequenceDecoder(object):
                     values=sparseLabels.values-1,
                     dense_shape=[batchSize, self.args['dataset']['maxSeqElements']])
 
+
                 nTimeSteps = tf.cast(data['nTimeSteps']/self.args['model']['subsampleFactor'], dtype=tf.int32)
-                if self.args['model']['modelName'] == 'conformer':
-                    nTimeSteps -= 1
                 # tf.print('nTimesteps shape:', tf.shape(nTimeSteps))
                 # tf.print('targets shape:', tf.shape(sparseLabels))
                 pred_loss = tf.compat.v1.nn.ctc_loss_v2(sparseLabels,
@@ -512,7 +531,10 @@ class NeuralSequenceDecoder(object):
                                                         name=None)
 
                 pred_loss = tf.reduce_mean(pred_loss)
-
+            elif self.args['lossType'] == 'rnnt':
+                labels = data_util.create_labels(tf.cast(data['seqClassIDs'], dtype=tf.int32),
+                                                 tf.cast(data['nSeqElements'], dtype=tf.int32))
+                pred_loss = self.rnnt_loss(labels, predictions)
             elif self.args['lossType'] == 'ce':
                 mask = tf.tile(data['ceMask'][:, :, tf.newaxis], [
                                1, 1, self.args['dataset']['nClasses']])
@@ -523,7 +545,6 @@ class NeuralSequenceDecoder(object):
             else:
                 raise Exception('Unexpected loss type:', self.args['lossType'])
             total_loss = pred_loss + regularization_loss
-            # total_loss = pred_loss
 
         #compute gradients + clip
         grads = tape.gradient(total_loss, self.trainableVariables)
@@ -543,7 +564,7 @@ class NeuralSequenceDecoder(object):
         output = {}
         #compute sequence-element error rate (edit distance) if we are in validation & ctc mode
         #return interval activations so we can visualize what's going on
-        if isinstance(self.model, models.GRU):
+        if self.args['model']['modelName'] == 'gru':
             intermediate_output = self.model.getIntermediateLayerOutput(
             inputTransformedFeatures)
             output['rnnUnits'] = intermediate_output
@@ -565,7 +586,23 @@ class NeuralSequenceDecoder(object):
 
         inputTransformedFeatures = self.inputLayers[layerIdx](
             data['inputFeatures'], training=False)
-        predictions = self.model(inputTransformedFeatures, training=False)
+        if self.args['model']['modelName'] == 'conformer':
+            inputTransformedFeatures = tf.expand_dims(inputTransformedFeatures, -1)
+            inputs = data_util.create_inputs(
+                inputs=inputTransformedFeatures,
+                inputs_length=data['nSeqElements'],
+                # we just prepend an additional blank to the labels
+                # to create placeholder predictions / inputs to the predictor net
+                predictions=tf.pad(data['seqClassIDs'],
+                                    tf.constant([[0, 0], [1, 0]]),
+                                    constant_values=self.args['model']['blankToken']),
+                predictions_length=data['nSeqElements'] + 1,
+            )
+        elif self.args['model']['modelName'] == 'gru':
+            inputs = inputTransformedFeatures
+        else:
+            raise Exception('unexpected model type:', self.args['model']['modelName'])
+        predictions = self.model(inputs, training=False)
 
         batchSize = tf.shape(data['seqClassIDs'])[0]
         if self.args['lossType'] == 'ctc':
@@ -578,8 +615,6 @@ class NeuralSequenceDecoder(object):
 
             nTimeSteps = tf.cast(
                 data['nTimeSteps'] / self.args['model']['subsampleFactor'], dtype=tf.int32)
-            if self.args['model']['modelName'] == 'conformer':
-                nTimeSteps -= 1
             # tf.print(nTimeSteps)
             pred_loss = tf.compat.v1.nn.ctc_loss_v2(sparseLabels,
                                                     predictions,
@@ -589,13 +624,21 @@ class NeuralSequenceDecoder(object):
                                                     blank_index=-1, name=None)
 
             pred_loss = tf.reduce_mean(pred_loss)
-
+        elif self.args['lossType'] == 'rnnt':
+            predictions, nTimeSteps = predictions['logits'], predictions['logits_length']
+            pass # pass, we don't actually track val loss (for now)
+            # labels = data_util.create_labels(tf.cast(data['seqClassIDs'], dtype=tf.int32),
+            #                                  tf.cast(data['nSeqElements'], dtype=tf.int32))
+            # pred_loss = self.rnnt_loss(labels, predictions)
         elif self.args['lossType'] == 'ce':
             mask = tf.tile(data['ceMask'][:, :, tf.newaxis], [
                            1, 1, self.args['dataset']['nClasses']])
             ceLoss = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
             pred_loss = ceLoss(data['classLabelsOneHot'],
                                predictions[:, :, 0:-1]*mask)
+            nTimeSteps = None
+        else:
+            raise Exception('unknown loss type:', self.args['lossType'])
 
         if self.args['lossType'] == 'ctc':
             sparseLabels = tf.cast(tf.sparse.from_dense(
@@ -608,14 +651,37 @@ class NeuralSequenceDecoder(object):
             decodedStrings, _ = tf.nn.ctc_greedy_decoder(tf.transpose(predictions, [1, 0, 2]),
                                                          nTimeSteps,
                                                          merge_repeated=True)
-            editDistance = tf.edit_distance(decodedStrings[0], tf.cast(
-                sparseLabels, tf.int64), normalize=False)
+            editDistance = tf.edit_distance(decodedStrings[0],
+                                            tf.cast(sparseLabels, tf.int64),
+                                            normalize=False)
+            seqErrorRate = tf.cast(tf.reduce_sum(editDistance), dtype=tf.float32)/tf.cast(
+                tf.reduce_sum(data['nSeqElements']), dtype=tf.float32)
+        elif self.args['lossType'] == 'rnnt':
+            sparseLabels = tf.cast(tf.sparse.from_dense(
+                data['seqClassIDs']), dtype=tf.int32)
+            sparseLabels = tf.sparse.SparseTensor(
+                indices=sparseLabels.indices,
+                values=sparseLabels.values-1,
+                dense_shape=[batchSize, self.args['dataset']['maxSeqElements']])
+
+            decodedStrings = self.model.recognize(inputs)
+            decodedStrings = tf.cast(tf.sparse.from_dense(
+                decodedStrings), dtype=tf.int32)
+            decodedStrings = [tf.sparse.SparseTensor(
+                indices=decodedStrings.indices,
+                values=decodedStrings.values-1, # TODO: should this -1 be here?
+                dense_shape=[batchSize, self.args['dataset']['maxSeqElements']])]
+            # breakpoint()
+            editDistance = tf.edit_distance(tf.cast(decodedStrings[0], tf.int64),
+                                            tf.cast(sparseLabels, tf.int64),
+                                            normalize=False)
             seqErrorRate = tf.cast(tf.reduce_sum(editDistance), dtype=tf.float32)/tf.cast(
                 tf.reduce_sum(data['nSeqElements']), dtype=tf.float32)
         else:
             decodedStrings = [tf.sparse.SparseTensor(
                 indices=[[0, 0]], values=[tf.constant(1, dtype=tf.int64)], dense_shape=[2, 2])]
             seqErrorRate = 0.0
+            editDistance = None
 
         output = {}
         output['logits'] = predictions

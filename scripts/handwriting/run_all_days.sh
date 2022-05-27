@@ -1,8 +1,5 @@
 #!/bin/bash
 
-source $CONDA_PREFIX/etc/profile.d/conda.sh
-conda activate bci
-
 python -m neuralDecoder.main \
     dataset=handwriting_all_days \
     batchSize=48 \

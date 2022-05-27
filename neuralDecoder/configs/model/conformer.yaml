@@ -1,19 +1,25 @@
 modelName: conformer
 
 #all input layers project down to this number of units before fanning out again into the conformer
-inputLayerSize: 16
 
-# Factor for subsampling conformer final outputs (should be >= 4)
-subsampleFactor: 4
+#**TODO: bump back up**
+inputLayerSize: 2
+
+blankToken: 0
+
+# # Factor for subsampling conformer final outputs (should be >= 4)
+# subsampleFactor: 4
 
 #l2 regularization cost
 weightReg: 1e-5
 
 # dimension of conformer block outputs
-encoderDim: 8
+#**TODO: bump back up**
+encoderDim: 2
 
 # number of conformer blocks in conformer
 # numEncoderLayers: 17
+#**TODO: bump back up**
 numEncoderLayers: 2
 
 # number of attention heads in each multi-head attention layer of conformer
