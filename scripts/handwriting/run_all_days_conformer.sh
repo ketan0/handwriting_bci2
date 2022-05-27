@@ -1,5 +1,8 @@
 #!/bin/bash
 
+source $CONDA_PREFIX/etc/profile.d/conda.sh
+conda activate bci
+
 python -m neuralDecoder.main \
     model=conformer \
     dataset=handwriting_all_days \
