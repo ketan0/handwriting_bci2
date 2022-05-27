@@ -1,9 +1,10 @@
 import tensorflow as tf
-from tensorflow.keras import Model, Sequential
-from tensorflow.keras.layers import Layer, Conv2D, Dense
+from tensorflow.keras import Model #, Sequential
 
-from conformer_tf import ConformerBlock
-from tensorflow.python.keras.layers.core import Dropout
+# from tensorflow.keras.layers import Layer, Conv2D, Dense
+
+# from conformer_tf import ConformerBlock
+# from tensorflow.python.keras.layers.core import Dropout
 
 class GRU(Model):
     def __init__(self,
@@ -15,7 +16,6 @@ class GRU(Model):
                  bidirectional=False,
                  dropout=0.0):
         super(GRU, self).__init__()
-
         weightReg = tf.keras.regularizers.L2(weightReg)
         #actReg = tf.keras.regularizers.L2(actReg)
         actReg = None
@@ -82,98 +82,223 @@ class GRU(Model):
         return x
 
 
-class Conv2dSubsampling(Layer):
-    def __init__(self, out_channels: int, subsampling_factor: int):
-        super().__init__()
-        self.sequential = Sequential([
-            Conv2D(out_channels, kernel_size=3, strides=(subsampling_factor // 2), activation='relu'),
-            Conv2D(out_channels, kernel_size=3, strides=(subsampling_factor // 2), activation='relu'),
-        ])
-        self.subsampling_factor = subsampling_factor
-    def call(self, inputs):
-        outputs = self.sequential(tf.expand_dims(inputs, -1))
-        batch_size, subsampled_lengths, subsampled_dim, channels = outputs.get_shape().as_list()
-        print('SHAPE:', batch_size, subsampled_lengths, subsampled_dim, channels)
-        outputs = tf.transpose(outputs, perm=[0, 1, 3, 2])
-        outputs = tf.reshape(outputs, [batch_size, subsampled_lengths, channels * subsampled_dim])
+# class Conv2dSubsampling(Layer):
+#     def __init__(self, out_channels: int, subsampling_factor: int):
+#         super().__init__()
+#         self.sequential = Sequential([
+#             Conv2D(out_channels, kernel_size=3, strides=(subsampling_factor // 2), activation='relu'),
+#             Conv2D(out_channels, kernel_size=3, strides=(subsampling_factor // 2), activation='relu'),
+#         ])
+#         self.subsampling_factor = subsampling_factor
+#     def call(self, inputs):
+#         outputs = self.sequential(tf.expand_dims(inputs, -1))
+#         batch_size, subsampled_lengths, subsampled_dim, channels = outputs.get_shape().as_list()
+#         print('SHAPE:', batch_size, subsampled_lengths, subsampled_dim, channels)
+#         outputs = tf.transpose(outputs, perm=[0, 1, 3, 2])
+#         outputs = tf.reshape(outputs, [batch_size, subsampled_lengths, channels * subsampled_dim])
+#         # TODO: generate random matrix + output
 
-        # outputs = tf.transpose(outputs, perm=[0, 3, 2, 1])
-        # outputs = tf.reshape(outputs, [batch_size, channels * subsampled_dim, subsampled_lengths])
+#         # outputs = tf.transpose(outputs, perm=[0, 3, 2, 1])
+#         # outputs = tf.reshape(outputs, [batch_size, channels * subsampled_dim, subsampled_lengths])
 
-        return outputs
+#         return outputs
+
+# TODO: convert this to yaml file (omitting irrelevant stuff, like speech_config)
+CONFORMER_CONFIG = {
+    "speech_config": {
+        "sample_rate": 16000,
+        "frame_ms": 25,
+        "stride_ms": 10,
+        "num_feature_bins": 80,
+        "feature_type": "log_mel_spectrogram",
+        "preemphasis": 0.97,
+        "normalize_signal": True,
+        "normalize_feature": True,
+        "normalize_per_frame": False,
+    },
+    "decoder_config": {
+        "vocabulary": None,
+        "target_vocab_size": 1000,
+        "max_subword_length": 10,
+        "blank_at_zero": True,
+        "beam_width": 0,
+        "norm_score": True,
+        "corpus_files": None,
+    },
+    "model_config": {
+        "name": "conformer",
+        "encoder_subsampling": {
+            "type": "conv2d",
+            "filters": 144,
+            "kernel_size": 3,
+            "strides": 2,
+        },
+        "encoder_positional_encoding": "sinusoid_concat",
+        "encoder_dmodel": 144,
+        "encoder_num_blocks": 16,
+        "encoder_head_size": 36,
+        "encoder_num_heads": 4,
+        "encoder_mha_type": "relmha",
+        "encoder_kernel_size": 32,
+        "encoder_fc_factor": 0.5,
+        "encoder_dropout": 0.1,
+        "prediction_embed_dim": 320,
+        "prediction_embed_dropout": 0,
+        "prediction_num_rnns": 1,
+        "prediction_rnn_units": 320,
+        "prediction_rnn_type": "lstm",
+        "prediction_rnn_implementation": 2,
+        "prediction_layer_norm": True,
+        "prediction_projection_units": 0,
+        "joint_dim": 320,
+        "prejoint_linear": True,
+        "joint_activation": "tanh",
+        "joint_mode": "add",
+    },
+    "learning_config": {
+        "train_dataset_config": {
+            "use_tf": True,
+            "augmentation_config": {
+                "feature_augment": {
+                    "time_masking": {
+                        "num_masks": 10,
+                        "mask_factor": 100,
+                        "p_upperbound": 0.05,
+                    },
+                    "freq_masking": {"num_masks": 1, "mask_factor": 27},
+                }
+            },
+            "data_paths": [
+                "/mnt/h/ML/Datasets/ASR/Raw/LibriSpeech/train-clean-100/transcripts.tsv"
+            ],
+            "tfrecords_dir": None,
+            "shuffle": True,
+            "cache": True,
+            "buffer_size": 100,
+            "drop_remainder": True,
+            "stage": "train",
+        },
+        "eval_dataset_config": {
+            "use_tf": True,
+            "data_paths": None,
+            "tfrecords_dir": None,
+            "shuffle": False,
+            "cache": True,
+            "buffer_size": 100,
+            "drop_remainder": True,
+            "stage": "eval",
+        },
+        "test_dataset_config": {
+            "use_tf": True,
+            "data_paths": None,
+            "tfrecords_dir": None,
+            "shuffle": False,
+            "cache": True,
+            "buffer_size": 100,
+            "drop_remainder": True,
+            "stage": "test",
+        },
+        "optimizer_config": {
+            "warmup_steps": 40000,
+            "beta_1": 0.9,
+            "beta_2": 0.98,
+            "epsilon": 1e-09,
+        },
+        "running_config": {
+            "batch_size": 2,
+            "num_epochs": 50,
+            "checkpoint": {
+                "filepath": "/mnt/e/Models/local/conformer/checkpoints/{epoch:02d}.h5",
+                "save_best_only": False,
+                "save_weights_only": True,
+                "save_freq": "epoch",
+            },
+            "states_dir": "/mnt/e/Models/local/conformer/states",
+            "tensorboard": {
+                "log_dir": "/mnt/e/Models/local/conformer/tensorboard",
+                "histogram_freq": 1,
+                "write_graph": True,
+                "write_images": True,
+                "update_freq": "epoch",
+                "profile_batch": 2,
+            },
+        },
+    },
+}
+
+# def create_conformer(args):
+
+# class ConformerEncoder(Layer):
+#     def __init__(
+#             self,
+#             encoder_dim: int,
+#             num_encoder_layers: int,
+#             num_attention_heads: int,
+#             feed_forward_expansion_factor: int,
+#             conv_expansion_factor: int,
+#             input_dropout_p: float,
+#             feed_forward_dropout_p: float,
+#             attention_dropout_p: float,
+#             conv_dropout_p: float,
+#             conv_kernel_size: int,
+#             subsampling_factor: int,
+#     ):
+#         super().__init__()
+#         self.conv_subsample = Conv2dSubsampling(out_channels=encoder_dim, subsampling_factor=subsampling_factor)
+#         self.input_projection = Sequential([
+#             Dense(encoder_dim),
+#             Dropout(input_dropout_p),
+#         ])
+#         self.conformer_blocks = Sequential([
+#             ConformerBlock(dim=encoder_dim, dim_head=encoder_dim, heads=num_attention_heads,
+#                            ff_mult=feed_forward_expansion_factor, # TODO: half_step_residual
+#                            conv_expansion_factor=conv_expansion_factor, conv_kernel_size=conv_kernel_size,
+#                            attn_dropout=attention_dropout_p, ff_dropout=feed_forward_dropout_p,
+#                            conv_dropout=conv_dropout_p)
+#             for _ in range(num_encoder_layers)
+#         ])
+
+#     def call(self, inputs):
+#         outputs = self.conv_subsample(inputs)
+#         # print('AFTER SUBSAMPLE:', outputs)
+#         outputs = self.input_projection(outputs)
+#         outputs = self.conformer_blocks(outputs)
+#         return outputs
 
 
-class ConformerEncoder(Layer):
-    def __init__(
-            self,
-            encoder_dim: int,
-            num_encoder_layers: int,
-            num_attention_heads: int,
-            feed_forward_expansion_factor: int,
-            conv_expansion_factor: int,
-            input_dropout_p: float,
-            feed_forward_dropout_p: float,
-            attention_dropout_p: float,
-            conv_dropout_p: float,
-            conv_kernel_size: int,
-            subsampling_factor: int,
-    ):
-        super().__init__()
-        self.conv_subsample = Conv2dSubsampling(out_channels=encoder_dim, subsampling_factor=subsampling_factor)
-        self.input_projection = Sequential([
-            Dense(encoder_dim),
-            Dropout(input_dropout_p),
-        ])
-        self.conformer_blocks = Sequential([
-            ConformerBlock(dim=encoder_dim, dim_head=encoder_dim, heads=num_attention_heads,
-                           ff_mult=feed_forward_expansion_factor, # TODO: half_step_residual
-                           conv_expansion_factor=conv_expansion_factor, conv_kernel_size=conv_kernel_size,
-                           attn_dropout=attention_dropout_p, ff_dropout=feed_forward_dropout_p,
-                           conv_dropout=conv_dropout_p)
-            for _ in range(num_encoder_layers)
-        ])
+# class Conformer(Model):
+#     def __init__(
+#             self,
+#             num_classes: int,
+#             encoder_dim: int,
+#             num_encoder_layers: int,
+#             num_attention_heads: int,
+#             feed_forward_expansion_factor: int,
+#             conv_expansion_factor: int,
+#             input_dropout_p: float,
+#             feed_forward_dropout_p: float,
+#             attention_dropout_p: float,
+#             conv_dropout_p: float,
+#             conv_kernel_size: int,
+#             subsampling_factor: int,
+#     ):
+#         super().__init__()
+#         self.encoder = ConformerEncoder(
+#             encoder_dim,
+#             num_encoder_layers,
+#             num_attention_heads,
+#             feed_forward_expansion_factor,
+#             conv_expansion_factor,
+#             input_dropout_p,
+#             feed_forward_dropout_p,
+#             attention_dropout_p,
+#             conv_dropout_p,
+#             conv_kernel_size,
+#             subsampling_factor,
+#         )
+#         self.fc = Dense(num_classes, use_bias=False)
 
-    def call(self, inputs):
-        outputs = self.conv_subsample(inputs)
-        # print('AFTER SUBSAMPLE:', outputs)
-        outputs = self.input_projection(outputs)
-        outputs = self.conformer_blocks(outputs)
-        return outputs
-
-
-class Conformer(Model):
-    def __init__(
-            self,
-            num_classes: int,
-            encoder_dim: int,
-            num_encoder_layers: int,
-            num_attention_heads: int,
-            feed_forward_expansion_factor: int,
-            conv_expansion_factor: int,
-            input_dropout_p: float,
-            feed_forward_dropout_p: float,
-            attention_dropout_p: float,
-            conv_dropout_p: float,
-            conv_kernel_size: int,
-            subsampling_factor: int,
-    ):
-        super().__init__()
-        self.encoder = ConformerEncoder(
-            encoder_dim,
-            num_encoder_layers,
-            num_attention_heads,
-            feed_forward_expansion_factor,
-            conv_expansion_factor,
-            input_dropout_p,
-            feed_forward_dropout_p,
-            attention_dropout_p,
-            conv_dropout_p,
-            conv_kernel_size,
-            subsampling_factor,
-        )
-        self.fc = Dense(num_classes, use_bias=False)
-
-    def call(self, inputs):
-        encoder_outputs = self.encoder(inputs)
-        outputs = self.fc(encoder_outputs)
-        return outputs
+#     def call(self, inputs):
+#         encoder_outputs = self.encoder(inputs)
+#         outputs = self.fc(encoder_outputs)
+#         return outputs
