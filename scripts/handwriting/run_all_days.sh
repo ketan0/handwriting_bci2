@@ -1,7 +1,7 @@
 #!/bin/bash
 
 python -m neuralDecoder.main \
-    model=gru
+    model=gru \
     dataset=handwriting_all_days \
     batchSize=48 \
     dataset.syntheticMixingRate=0 \
