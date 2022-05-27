@@ -10,6 +10,7 @@ conda activate bci
 module load cuda/11.2.0 cudnn/8.1.1.33
 
 python -m neuralDecoder.main \
+    model=gru
     dataset=handwriting_all_days \
     batchSize=48 \
     dataset.syntheticMixingRate=0 \
