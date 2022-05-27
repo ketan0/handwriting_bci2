@@ -15,7 +15,8 @@ from tensorflow_asr.losses.rnnt_loss import RnntLoss
 from tensorflow_asr.utils import data_util
 
 import neuralDecoder.lrSchedule as lrSchedule
-import neuralDecoder.models as models
+from neuralDecoder.models.conformer import CONFORMER_CONFIG
+from neuralDecoder.models.gru import GRU
 from neuralDecoder.datasets import getDataset
 from neuralDecoder.singleStepRNN import gaussSmooth
 
@@ -48,17 +49,17 @@ class NeuralSequenceDecoder(object):
 
         # Init GRU model
         if self.args['model']['modelName'] == 'gru':
-            self.model = models.GRU(self.args['model']['nUnits'],
-                            self.args['model']['weightReg'],
-                            self.args['model']['actReg'],
-                            self.args['model']['subsampleFactor'],
-                            self.args['dataset']['nClasses'] + 1,
-                            self.args['model']['bidirectional'],
-                            self.args['model']['dropout'])
+            self.model = GRU(self.args['model']['nUnits'],
+                             self.args['model']['weightReg'],
+                             self.args['model']['actReg'],
+                             self.args['model']['subsampleFactor'],
+                             self.args['dataset']['nClasses'] + 1,
+                             self.args['model']['bidirectional'],
+                             self.args['model']['dropout'])
             self.model(tf.keras.Input(shape=(None, self.args['model']['inputLayerSize'])))
             self.model.summary()
         elif self.args['model']['modelName'] == 'conformer':
-            config = Config(models.CONFORMER_CONFIG)
+            config = Config(CONFORMER_CONFIG)
             self.model = Conformer(**config.model_config,
                                    vocabulary_size=args['dataset']['nClasses'] + 1)
             self.model.text_featurizer = CharFeaturizer(config.decoder_config)
