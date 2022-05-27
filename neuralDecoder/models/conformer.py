@@ -33,33 +33,45 @@ CONFORMER_CONFIG = {
             "strides": 2,
         },
         "encoder_positional_encoding": "sinusoid_concat",
-        #**TODO: bump back up**
+
+        #TODO: bump back up**
         # "encoder_dmodel": 144,
         "encoder_dmodel": 4,
+
         #**TODO: bump back up**
         # "encoder_num_blocks": 16,
         "encoder_num_blocks": 2,
+
         "encoder_head_size": 36,
         "encoder_num_heads": 4,
         "encoder_mha_type": "relmha",
         "encoder_kernel_size": 32,
         "encoder_fc_factor": 0.5,
-        "encoder_dropout": 0.1,
+
+        #TODO: change back**
+        # "encoder_dropout": 0.1,
+        "encoder_dropout": 0,
+
         #**TODO: bump back up**
         # "prediction_embed_dim": 320,
         "prediction_embed_dim": 4,
+
         "prediction_embed_dropout": 0,
         "prediction_num_rnns": 1,
+
         #**TODO: bump back up**
         # "prediction_rnn_units": 320,
         "prediction_rnn_units": 4,
+
         "prediction_rnn_type": "lstm",
         "prediction_rnn_implementation": 2,
         "prediction_layer_norm": True,
         "prediction_projection_units": 0,
-        #**TODO: bump back up**
+
+        #TODO: bump back up**
         # "joint_dim": 320,
         "joint_dim": 16,
+
         "prejoint_linear": True,
         "joint_activation": "tanh",
         "joint_mode": "add",
