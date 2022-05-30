@@ -165,6 +165,7 @@ class NeuralSequenceDecoder(object):
                 self.args['batchSize'],
                 isTraining=True)
 
+            valDir = os.path.join(thisDataDir, thisDataset, 'test')
             newValDataset = getDataset(datasetName)(trainDir if self.args['overfitBatch'] else valDir,
                                                     self.args['dataset']['nInputFeatures'],
                                                     self.args['dataset']['nClasses'],
