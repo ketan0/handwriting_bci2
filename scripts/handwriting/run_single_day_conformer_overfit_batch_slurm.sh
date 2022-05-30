@@ -1,5 +1,9 @@
 #!/bin/bash
-set -euxo pipefail
+set -euo pipefail
+
+source $SCRATCH/miniconda3/etc/profile.d/conda.sh
+conda activate bci
+module load system libsndfile cuda/11.2.0 cudnn/8.1.1.33
 
 python -m neuralDecoder.main \
     model=conformer_toy \
