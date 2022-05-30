@@ -5,8 +5,8 @@ datasetToLayerMap: [0]
 datasetProbability: [1.0]
 datasetProbabilityVal: [1.0]
 dataDir:
-  - /scratch/groups/shenoy/data/handwriting_data/normalize_with_block_means
-syntheticDataDir: /scratch/users/stfan/handwritingBCIData/RNNTrainingSteps/Step3_SyntheticSentences_tf2/HeldOutBlocks
+  - /Users/ketanagrawal/CS224s/normalize_with_block_means
+syntheticDataDir: /Users/ketanagrawal/CS224s/handwritingBCIData/RNNTrainingSteps/Step3_SyntheticSentences_tf2/HeldOutBlocks
 syntheticMixingRate: 0.0
 whiteNoiseSD: 1.2
 constantOffsetSD: 0.6
@@ -16,6 +16,8 @@ timWarpFactor: 0.0
 staticGainSD: 0.0
 nClasses: 31
 maxSeqElements: 500
+
+subsetSize: -1
 
 # Dataset shuffle buffer size
 bufferSize: 192

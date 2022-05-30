@@ -92,10 +92,12 @@ class HandwritingDataset():
             datasetForAdapt = dataset.map(lambda x: x['inputFeatures'] + 0.001,
                 num_parallel_calls=tf.data.AUTOTUNE)
 
-            # Take a subset of the data if specified
-            if self.subsetSize > 0:
-                dataset = dataset.take(self.subsetSize)
+        # Take a subset of the data if specified
+        if self.subsetSize > 0:
+            print('Subsetting dataset to size', self.subsetSize)
+            dataset = dataset.take(self.subsetSize)
 
+        if isTraining:
             dataset = dataset.shuffle(self.bufferSize)
             if self.syntheticMixingRate == 0:
                 dataset = dataset.repeat()

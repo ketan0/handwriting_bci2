@@ -33,6 +33,9 @@ gpuNumber: "0"
 # mode can either be 'train' or 'inference'
 mode: train
 
+# whether to configure training code to overfit on one batch only
+overfitBatch: False
+
 #where to save the RNN files
 outputDir:
 

@@ -2,6 +2,7 @@ import os
 import random
 from datetime import datetime
 
+import wandb
 import numpy as np
 import scipy.io
 import scipy.special
@@ -14,11 +15,16 @@ from tensorflow_asr.losses.rnnt_loss import RnntLoss
 from tensorflow_asr.utils import data_util
 
 import neuralDecoder.lrSchedule as lrSchedule
-from neuralDecoder.models.conformer import CONFORMER_CONFIG
 from neuralDecoder.models.gru import GRU
 from neuralDecoder.datasets import getDataset
 from neuralDecoder.singleStepRNN import gaussSmooth
+# from neuralDecoder.utils.pseudoLabelUtils import CHAR_DEF
 
+CHAR_DEF = ['a', 'b', 'c', 'd', 'e', 'f', 'g',
+            'h', 'i', 'j', 'k', 'l', 'm', 'n',
+            'o', 'p', 'q', 'r', 's', 't',
+            'u', 'v', 'w', 'x', 'y', 'z',
+            '>', ',', "'", '~', '?']
 
 class NeuralSequenceDecoder(object):
     """
@@ -28,9 +34,7 @@ class NeuralSequenceDecoder(object):
     """
 
     def __init__(self, args):
-        self.args = args
-        print(args)
-
+        self.args = OmegaConf.to_container(args)
         if not os.path.isdir(self.args['outputDir']):
             os.mkdir(self.args['outputDir'])
 
@@ -42,6 +46,7 @@ class NeuralSequenceDecoder(object):
         #random variable seeding
         if self.args['seed'] == -1:
             self.args['seed'] = datetime.now().microsecond
+        print('Using random seed of', self.args['seed'])
         np.random.seed(self.args['seed'])
         tf.random.set_seed(self.args['seed'])
         random.seed(self.args['seed'])
@@ -58,7 +63,8 @@ class NeuralSequenceDecoder(object):
             self.model(tf.keras.Input(shape=(None, self.args['model']['inputLayerSize'])))
             self.model.summary()
         elif self.args['model']['modelName'] == 'conformer':
-            config = Config(CONFORMER_CONFIG)
+            config = Config({k: self.args['model'][k]
+                             for k in ['model_config', 'decoder_config']})
             self.model = Conformer(**config.model_config,
                                    vocabulary_size=args['dataset']['nClasses'] + 1)
             self.model.text_featurizer = CharFeaturizer(config.decoder_config)
@@ -94,9 +100,12 @@ class NeuralSequenceDecoder(object):
                 kernelInit = tf.keras.initializers.identity()
             else:
                 kernelInit = 'glorot_uniform'
+            # only use L2 regularization for gru
+            regularizer = (tf.keras.regularizers.L2(self.args['model']['weightReg'])
+                           if self.args['model']['modelName'] == 'gru' else None)
             linearLayer = tf.keras.layers.Dense(self.args['model']['inputLayerSize'],
                                                 kernel_initializer=kernelInit,
-                                                kernel_regularizer=tf.keras.regularizers.L2(self.args['model']['weightReg']))
+                                                kernel_regularizer=regularizer)
             linearLayer.build(input_shape=[nInputFeatures])
 
             self.inputLayers.append(linearLayer)
@@ -156,12 +165,12 @@ class NeuralSequenceDecoder(object):
                 self.args['batchSize'],
                 isTraining=True)
 
-            valDir = os.path.join(thisDataDir, thisDataset, 'test')
-            newValDataset = getDataset(datasetName)(valDir,
+            newValDataset = getDataset(datasetName)(trainDir if self.args['overfitBatch'] else valDir,
                                                     self.args['dataset']['nInputFeatures'],
                                                     self.args['dataset']['nClasses'],
                                                     self.args['dataset']['maxSeqElements'],
-                                                    self.args['dataset']['bufferSize'])
+                                                    self.args['dataset']['bufferSize'],
+                                                    subsetSize=self.args['dataset'].get('subsetSize', -1))
             newValDataset = newValDataset.build(self.args['batchSize'],
                                                 isTraining=False)
 
@@ -385,12 +394,15 @@ class NeuralSequenceDecoder(object):
         #run through the specified dataset a single time and return the outputs
         infOut = {}
         infOut['logits'] = []
+        infOut['predictionLosses'] = []
         infOut['logitLengths'] = []
         infOut['decodedSeqs'] = []
+        infOut['decodedStrings'] = []
         infOut['editDistances'] = []
         infOut['trueSeqLengths'] = []
         infOut['trueSeqs'] = []
         infOut['transcriptions'] = []
+        infOut['transcriptionStrings'] = []
         allData = []
 
         for datasetIdx, valProb in enumerate(self.args['dataset']['datasetProbabilityVal']):
@@ -403,6 +415,7 @@ class NeuralSequenceDecoder(object):
                 out = self._valStep(data, layerIdx)
 
                 infOut['logits'].append(out['logits'].numpy())
+                infOut['predictionLosses'].append(out['predictionLoss'].numpy())
                 infOut['editDistances'].append(out['editDistance'].numpy())
                 infOut['trueSeqLengths'].append(out['nSeqElements'].numpy())
                 infOut['logitLengths'].append(out['logitLengths'].numpy())
@@ -410,13 +423,14 @@ class NeuralSequenceDecoder(object):
                 infOut['trueSeqs'].append(out['trueSeq'].numpy()-1)
 
                 tmp = tf.sparse.to_dense(
-                    out['decodedStrings'][0], default_value=-1).numpy()
+                    out['decodedCharIDs'][0], default_value=-1).numpy()
                 paddedMat = np.zeros(
                     [tmp.shape[0], self.args['dataset']['maxSeqElements']]).astype(np.int32)-1
                 end = min(tmp.shape[1], self.args['dataset']['maxSeqElements'])
                 paddedMat[:, :end] = tmp[:, :end]
                 infOut['decodedSeqs'].append(paddedMat)
-
+                infOut['decodedStrings'].extend(out['decodedStrings'])
+                infOut['transcriptionStrings'].extend(out['transcriptionStrings'])
                 infOut['transcriptions'].append(out['transcription'].numpy())
 
                 if returnData:
@@ -430,7 +444,11 @@ class NeuralSequenceDecoder(object):
         # infOut['logits'] = np.stack(infOut['logits'], axis=0)
 
         # infOut['logitLengths'] = np.concatenate(infOut['logitLengths'], axis=0)
+        infOut['predictionLoss'] = np.mean(infOut['predictionLosses'])
+        print('val pred loss:', infOut['predictionLoss'])
         infOut['decodedSeqs'] = np.concatenate(infOut['decodedSeqs'], axis=0)
+        # infOut['decodedStrings'] = np.concatenate(
+        #     infOut['decodedStrings'], axis=0)
         infOut['editDistances'] = np.concatenate(
             infOut['editDistances'], axis=0)
         infOut['trueSeqLengths'] = np.concatenate(
@@ -449,16 +467,16 @@ class NeuralSequenceDecoder(object):
     def _addRowToStatsTable(self, currentTable, batchIdx, computationTime, minibatchOutput, isTrainBatch):
         currentTable[batchIdx, :] = np.array([batchIdx,
                                               computationTime,
-                                              minibatchOutput['predictionLoss'] if isTrainBatch else 0.0,
+                                              minibatchOutput['predictionLoss'],
                                               minibatchOutput['regularizationLoss'] if isTrainBatch else 0.0,
                                               minibatchOutput['seqErrorRate'],
                                               minibatchOutput['gradNorm'] if isTrainBatch else 0.0])
 
         prefix = 'train' if isTrainBatch else 'val'
         with self.summary_writer.as_default():
+            tf.summary.scalar(
+                f'{prefix}/predictionLoss', minibatchOutput['predictionLoss'], step=batchIdx)
             if isTrainBatch:
-                tf.summary.scalar(
-                    f'{prefix}/predictionLoss', minibatchOutput['predictionLoss'], step=batchIdx)
                 tf.summary.scalar(
                     f'{prefix}/regLoss', minibatchOutput['regularizationLoss'], step=batchIdx)
                 tf.summary.scalar(f'{prefix}/gradNorm',
@@ -470,6 +488,11 @@ class NeuralSequenceDecoder(object):
             if isTrainBatch:
                 tf.summary.scalar(
                     f'{prefix}/lr', self.optimizer._decayed_lr(tf.float32), step=batchIdx)
+            elif self.args['wandb']['enabled']:
+                table = wandb.Table(columns=['prediction (greedy)', 'target'])
+                for pred, targ in zip(minibatchOutput['decodedStrings'], minibatchOutput['transcriptionStrings']):
+                    table.add_data(pred, targ)
+                wandb.log({'preds_table': table})
 
     @tf.function()
     def _trainStep(self, datasetIdx, layerIdx):
@@ -488,14 +511,13 @@ class NeuralSequenceDecoder(object):
         with tf.GradientTape() as tape:
             inputTransformedFeatures = tf.switch_case(
                 layerIdx, inputTransformSelector)
-            tf.print('input shape:', tf.shape(inputTransformedFeatures))
+            # tf.print('input shape:', tf.shape(inputTransformedFeatures))
             if self.args['model']['modelName'] == 'conformer':
                 inputTransformedFeatures = tf.expand_dims(inputTransformedFeatures, -1)
                 inputs = data_util.create_inputs(
                     inputs=inputTransformedFeatures,
                     inputs_length=data['nSeqElements'],
-                    # we just prepend an additional blank to the labels
-                    # to create placeholder predictions / inputs to the predictor net
+                    # to get preds placeholder, we just prepend an additional blank to the labels
                     predictions=tf.pad(data['seqClassIDs'],
                                        tf.constant([[0, 0], [1, 0]]),
                                        constant_values=self.args['model']['blankToken']),
@@ -510,7 +532,7 @@ class NeuralSequenceDecoder(object):
             if self.args['model']['modelName'] == 'gru': # TODO: make a useRegularizationLoss yaml param
                 regularization_loss = tf.math.add_n(self.model.losses) + \
                     tf.math.add_n(tf.switch_case(layerIdx, regLossSelector))
-            else:
+            else: # not using reg loss for conformer and TDNN
                 regularization_loss = 0.0
 
             batchSize = tf.shape(data['inputFeatures'])[0]
@@ -537,8 +559,10 @@ class NeuralSequenceDecoder(object):
 
                 pred_loss = tf.reduce_mean(pred_loss)
             elif self.args['lossType'] == 'rnnt':
-                tf.print('predictions:', tf.shape(predictions['logits']))
-                tf.print('targets shape:', tf.shape(data['seqClassIDs']))
+                # tf.print('predictions:', tf.shape(predictions['logits']))
+                # tf.print('targets shape:', tf.shape(data['seqClassIDs']))
+                # target_str = ''.join([CHARS[x.numpy()] for x in data['seqClassIDs'][0] if x != 0])
+                # print('train targets:', target_str)
                 labels = data_util.create_labels(tf.cast(data['seqClassIDs'], dtype=tf.int32),
                                                  tf.cast(data['nSeqElements'], dtype=tf.int32))
                 pred_loss = self.rnnt_loss(labels, predictions)
@@ -598,13 +622,14 @@ class NeuralSequenceDecoder(object):
             inputs = data_util.create_inputs(
                 inputs=inputTransformedFeatures,
                 inputs_length=data['nSeqElements'],
-                # we just prepend an additional blank to the labels
-                # to create placeholder predictions / inputs to the predictor net
+                # to get preds placeholder, we just prepend an additional blank to the labels
                 predictions=tf.pad(data['seqClassIDs'],
                                     tf.constant([[0, 0], [1, 0]]),
                                     constant_values=self.args['model']['blankToken']),
                 predictions_length=data['nSeqElements'] + 1,
             )
+            # print('inputs shape:', inputs['inputs'].shape)
+            # print('inputs lengths:', inputs['inputs_length'])
         elif self.args['model']['modelName'] == 'gru':
             inputs = inputTransformedFeatures
         else:
@@ -631,74 +656,55 @@ class NeuralSequenceDecoder(object):
                                                     blank_index=-1, name=None)
 
             pred_loss = tf.reduce_mean(pred_loss)
-        elif self.args['lossType'] == 'rnnt':
-            predictions, nTimeSteps = predictions['logits'], predictions['logits_length']
-            pass # pass, we don't actually track val loss (for now)
-            # labels = data_util.create_labels(tf.cast(data['seqClassIDs'], dtype=tf.int32),
-            #                                  tf.cast(data['nSeqElements'], dtype=tf.int32))
-            # pred_loss = self.rnnt_loss(labels, predictions)
-        elif self.args['lossType'] == 'ce':
-            mask = tf.tile(data['ceMask'][:, :, tf.newaxis], [
-                           1, 1, self.args['dataset']['nClasses']])
-            ceLoss = tf.keras.losses.CategoricalCrossentropy(from_logits=True)
-            pred_loss = ceLoss(data['classLabelsOneHot'],
-                               predictions[:, :, 0:-1]*mask)
-            nTimeSteps = None
-        else:
-            raise Exception('unknown loss type:', self.args['lossType'])
 
-        if self.args['lossType'] == 'ctc':
-            sparseLabels = tf.cast(tf.sparse.from_dense(
-                data['seqClassIDs']), dtype=tf.int32)
-            sparseLabels = tf.sparse.SparseTensor(
-                indices=sparseLabels.indices,
-                values=sparseLabels.values-1,
-                dense_shape=[batchSize, self.args['dataset']['maxSeqElements']])
-
-            decodedStrings, _ = tf.nn.ctc_greedy_decoder(tf.transpose(predictions, [1, 0, 2]),
+            decodedCharIDs, _ = tf.nn.ctc_greedy_decoder(tf.transpose(predictions, [1, 0, 2]),
                                                          nTimeSteps,
                                                          merge_repeated=True)
-            editDistance = tf.edit_distance(decodedStrings[0],
-                                            tf.cast(sparseLabels, tf.int64),
-                                            normalize=False)
-            seqErrorRate = tf.cast(tf.reduce_sum(editDistance), dtype=tf.float32)/tf.cast(
-                tf.reduce_sum(data['nSeqElements']), dtype=tf.float32)
         elif self.args['lossType'] == 'rnnt':
-            sparseLabels = tf.cast(tf.sparse.from_dense(
-                data['seqClassIDs']), dtype=tf.int32)
-            sparseLabels = tf.sparse.SparseTensor(
-                indices=sparseLabels.indices,
-                values=sparseLabels.values-1,
-                dense_shape=[batchSize, self.args['dataset']['maxSeqElements']])
+            labels = data_util.create_labels(tf.cast(data['seqClassIDs'], dtype=tf.int32),
+                                            tf.cast(data['nSeqElements'], dtype=tf.int32))
+            pred_loss = self.rnnt_loss(labels, predictions)
+            predictions, nTimeSteps = predictions['logits'], predictions['logits_length']
 
-            decodedStrings = self.model.recognize(inputs)
-            decodedStrings = tf.cast(tf.sparse.from_dense(
-                decodedStrings), dtype=tf.int32)
-            decodedStrings = [tf.sparse.SparseTensor(
-                indices=decodedStrings.indices,
-                values=decodedStrings.values-1, # TODO: should this -1 be here?
+            decodedCharIDs = self.model.recognize(inputs)
+            assert(decodedCharIDs is not None)
+            decodedCharIDs = tf.cast(tf.sparse.from_dense(
+                decodedCharIDs), dtype=tf.int32)
+            decodedCharIDs = [tf.sparse.SparseTensor(
+                indices=decodedCharIDs.indices,
+                values=decodedCharIDs.values, # TODO: should this -1 be here?
                 dense_shape=[batchSize, self.args['dataset']['maxSeqElements']])]
-            editDistance = tf.edit_distance(tf.cast(decodedStrings[0], tf.int64),
-                                            tf.cast(sparseLabels, tf.int64),
-                                            normalize=False)
-            seqErrorRate = tf.cast(tf.reduce_sum(editDistance), dtype=tf.float32)/tf.cast(
-                tf.reduce_sum(data['nSeqElements']), dtype=tf.float32)
         else:
-            decodedStrings = [tf.sparse.SparseTensor(
-                indices=[[0, 0]], values=[tf.constant(1, dtype=tf.int64)], dense_shape=[2, 2])]
-            seqErrorRate = 0.0
-            editDistance = None
-
+            raise Exception('unknown loss type:', self.args['lossType'])
+        decodedCharIDsNumpy = tf.sparse.to_dense(decodedCharIDs[0]).numpy()
+        decodedStrings = [''.join([CHAR_DEF[charID-1] for charID in sent if charID != 0])
+                          for sent in decodedCharIDsNumpy]
+        sparseLabels = tf.cast(tf.sparse.from_dense(
+            data['seqClassIDs']), dtype=tf.int32)
+        sparseLabels = tf.sparse.SparseTensor(
+            indices=sparseLabels.indices,
+            values=sparseLabels.values-1,
+            dense_shape=[batchSize, self.args['dataset']['maxSeqElements']])
+        editDistance = tf.edit_distance(tf.cast(decodedCharIDs[0], tf.int64),
+                                        tf.cast(sparseLabels, tf.int64),
+                                        normalize=False)
+        seqErrorRate = tf.cast(tf.reduce_sum(editDistance), dtype=tf.float32)/tf.cast(
+            tf.reduce_sum(data['nSeqElements']), dtype=tf.float32)
         output = {}
         output['logits'] = predictions
-        output['decodedStrings'] = decodedStrings
+        output['predictionLoss'] = pred_loss
+        output['decodedCharIDs'] = decodedCharIDs
         output['seqErrorRate'] = seqErrorRate
         output['editDistance'] = editDistance
         output['trueSeq'] = data['seqClassIDs']
         output['nSeqElements'] = data['nSeqElements']
         output['transcription'] = data['transcription']
+
         output['logitLengths'] = nTimeSteps
 
+        output['decodedStrings'] = decodedStrings
+        output['transcriptionStrings'] = [''.join([CHAR_DEF[charID-1] for charID in sent if charID != 0])
+                                         for sent in data['seqClassIDs']]
         return output
 
 
