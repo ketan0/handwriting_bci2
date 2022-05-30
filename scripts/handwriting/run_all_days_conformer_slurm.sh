@@ -7,7 +7,7 @@
 
 source $CONDA_PREFIX/etc/profile.d/conda.sh
 conda activate bci
-module load cuda/11.2.0 cudnn/8.1.1.33
+module load system sndfile cuda/11.2.0 cudnn/8.1.1.33
 
 python -m neuralDecoder.main \
     model=conformer \
