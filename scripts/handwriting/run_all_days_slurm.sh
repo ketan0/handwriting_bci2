@@ -6,7 +6,7 @@
 #SBATCH --mem=32G
 
 conda activate base
-source $CONDA_PREFIX/etc/profile.d/conda.sh
+source $SCRATCH/miniconda3/etc/profile.d/conda.sh
 conda activate bci
 module load system sndfile cuda/11.2.0 cudnn/8.1.1.33
 
@@ -15,4 +15,4 @@ python -m neuralDecoder.main \
     dataset=handwriting_all_days \
     batchSize=48 \
     dataset.syntheticMixingRate=0 \
-    outputDir=/scratch/users/agrawalk/CS224s/run_all_days_output
+    outputDir=$SCRATCH/CS224s/run_all_days_output

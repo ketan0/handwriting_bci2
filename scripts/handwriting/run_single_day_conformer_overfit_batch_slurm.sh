@@ -14,4 +14,4 @@ python -m neuralDecoder.main \
     seed=1 \
     batchSize=1 \
     dataset.syntheticMixingRate=0 \
-    outputDir=/Users/ketanagrawal/CS224s/run_all_days_conformer_output
+    outputDir=$SCRATCH/CS224s/run_all_days_conformer_overfit_batch_output
