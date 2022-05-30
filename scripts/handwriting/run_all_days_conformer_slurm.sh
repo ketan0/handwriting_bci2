@@ -5,7 +5,6 @@
 #SBATCH -C GPU_SKU:V100S_PCIE
 #SBATCH --mem=32G
 
-conda activate base
 source $SCRATCH/miniconda3/etc/profile.d/conda.sh
 conda activate bci
 module load system sndfile cuda/11.2.0 cudnn/8.1.1.33
