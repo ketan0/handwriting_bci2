@@ -4,6 +4,7 @@
 #SBATCH -G 1
 #SBATCH -C GPU_SKU:V100S_PCIE
 #SBATCH --mem=32G
+set -euo pipefail
 
 source $SCRATCH/miniconda3/etc/profile.d/conda.sh
 conda activate bci
