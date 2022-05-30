@@ -1,11 +1,11 @@
 modelName: conformer
 
 
-# all input layers project down to this number of units before fanning out again into the conformer
+#all input layers project down to this number of units before fanning out again into the conformer
 inputLayerSize: 8
 blankToken: 0
 
-# config that is passed into TensorflowASR's Conformer
+
 decoder_config:
   vocabulary: /Users/ketanagrawal/CS224s/handwriting_bci2/neuralDecoder/datasets/char_def.txt
   blank_at_zero: True
@@ -17,15 +17,18 @@ model_config:
   name: conformer
   encoder_subsampling:
     type: conv2d
-    filters: 144
+    # filters: 144
+    filters: 8
     kernel_size: 3
     strides: 2
 
   encoder_positional_encoding: sinusoid_concat
 
-  encoder_dmodel: 144
+  # encoder_dmodel: 144
+  encoder_dmodel: 16
 
-  encoder_num_blocks: 16
+  # encoder_num_blocks: 16
+  encoder_num_blocks: 2
 
   encoder_head_size: 36
   encoder_num_heads: 4
@@ -33,23 +36,25 @@ model_config:
   encoder_kernel_size: 32
   encoder_fc_factor: 0.5
 
-  # TODO: turn dropout back on, probably...
   # encoder_dropout: 0.1
   encoder_dropout: 0
 
-  prediction_embed_dim: 320
+  # prediction_embed_dim: 320
+  prediction_embed_dim: 16
 
   prediction_embed_dropout: 0
   prediction_num_rnns: 1
 
-  prediction_rnn_units: 320
+  # prediction_rnn_units: 320
+  prediction_rnn_units: 16
 
   prediction_rnn_type: lstm
   prediction_rnn_implementation: 2
   prediction_layer_norm: True
   prediction_projection_units: 0
 
-  joint_dim: 320
+  # joint_dim: 320
+  joint_dim: 16
 
   prejoint_linear: True
   joint_activation: tanh
