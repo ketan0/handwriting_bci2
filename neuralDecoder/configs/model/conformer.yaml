@@ -3,7 +3,7 @@ modelName: conformer
 #all input layers project down to this number of units before fanning out again into the conformer
 
 #**TODO: bump back up**
-inputLayerSize: 2
+inputLayerSize: 8
 
 blankToken: 0
 
