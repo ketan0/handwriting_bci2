@@ -1,5 +1,4 @@
 import os
-import math
 import random
 from datetime import datetime
 
@@ -224,7 +223,7 @@ class NeuralSequenceDecoder(object):
             if self.args['mode'] == 'infer':
                 if self.args['loadCheckpointIdx'] is not None:
                     ckptPath = os.path.join(self.args['outputDir'], f'ckpt-{self.args["loadCheckpointIdx"]}')
-            print('Loading from : ' + ckptPath)
+            print('Loading from : ' + str(ckptPath))
             self.checkpoint.restore(ckptPath).expect_partial()
         else:
             if self.args['loadDir'] != None and os.path.exists(os.path.join(self.args['loadDir'], 'checkpoint')):
@@ -233,7 +232,7 @@ class NeuralSequenceDecoder(object):
                 else:
                     ckptPath = tf.train.latest_checkpoint(self.args['loadDir'])
 
-                print('Loading from : ' + ckptPath)
+                print('Loading from : ' + str(ckptPath))
                 self.checkpoint = tf.train.Checkpoint(**ckptVars)
                 self.checkpoint.restore(ckptPath)
 
@@ -259,7 +258,7 @@ class NeuralSequenceDecoder(object):
 
         # Tensorboard summary
         if self.args['mode'] == 'train':
-            self.summary_writer = tf.summary.create_file_writer(
+            self.summary_writer = tf.summary.create_file_writer( # type: ignore
                 self.args['outputDir'])
 
     def _datasetLayerTransform(self, dat, normLayer, whiteNoiseSD, constantOffsetSD, randomWalkSD, staticGainSD):
@@ -307,14 +306,14 @@ class NeuralSequenceDecoder(object):
         perBatchData_val = np.zeros([self.args['nBatchesToTrain'] + 1, 6])
 
         # Restore snapshot
-        restoredStep = int(self.checkpoint.step)
+        restoredStep = int(self.checkpoint.step) # type: ignore
         if restoredStep > 0:
             outputSnapshot = scipy.io.loadmat(self.args['outputDir']+'/outputSnapshot')
             perBatchData_train = outputSnapshot['perBatchData_train']
             perBatchData_val = outputSnapshot['perBatchData_val']
 
         saveBestCheckpoint = self.args['batchesPerSave'] == 0
-        bestValCer = self.checkpoint.bestValCer
+        bestValCer = self.checkpoint.bestValCer # type: ignore
         print('bestValCer: ' + str(bestValCer))
         for batchIdx in range(restoredStep, self.args['nBatchesToTrain'] + 1):
             #--training--
@@ -323,11 +322,16 @@ class NeuralSequenceDecoder(object):
             layerIdx = self.args['dataset']['datasetToLayerMap'][datasetIdx]
 
             dtStart = datetime.now()
+            # tf.summary.trace_on(graph=True, profiler=False)
             trainOut = self._trainStep(
                 tf.constant(datasetIdx, dtype=tf.int32),
                 tf.constant(layerIdx, dtype=tf.int32))
+            # with self.summary_writer.as_default():
+            #     tf.summary.trace_export(
+            #         name="trainStep_graph_trace",
+            #         step=batchIdx)
 
-            self.checkpoint.step.assign_add(1)
+            self.checkpoint.step.assign_add(1) # type: ignore
             totalSeconds = (datetime.now()-dtStart).total_seconds()
             self._addRowToStatsTable(
                 perBatchData_train, batchIdx, totalSeconds, trainOut, True)
@@ -467,7 +471,7 @@ class NeuralSequenceDecoder(object):
                 tf.summary.scalar(
                     f'{prefix}/lr', self.optimizer._decayed_lr(tf.float32), step=batchIdx)
 
-    # TODO: re-add tf.function decorator
+    @tf.function()
     def _trainStep(self, datasetIdx, layerIdx):
         #loss function & regularization
         data = tf.switch_case(datasetIdx, self.trainDatasetSelector)
@@ -484,7 +488,7 @@ class NeuralSequenceDecoder(object):
         with tf.GradientTape() as tape:
             inputTransformedFeatures = tf.switch_case(
                 layerIdx, inputTransformSelector)
-            # tf.print('input shape:', tf.shape(inputTransformedFeatures))
+            tf.print('input shape:', tf.shape(inputTransformedFeatures))
             if self.args['model']['modelName'] == 'conformer':
                 inputTransformedFeatures = tf.expand_dims(inputTransformedFeatures, -1)
                 inputs = data_util.create_inputs(
@@ -507,7 +511,7 @@ class NeuralSequenceDecoder(object):
                 regularization_loss = tf.math.add_n(self.model.losses) + \
                     tf.math.add_n(tf.switch_case(layerIdx, regLossSelector))
             else:
-                regularization_loss = 0
+                regularization_loss = 0.0
 
             batchSize = tf.shape(data['inputFeatures'])[0]
             if self.args['lossType'] == 'ctc':
@@ -533,6 +537,8 @@ class NeuralSequenceDecoder(object):
 
                 pred_loss = tf.reduce_mean(pred_loss)
             elif self.args['lossType'] == 'rnnt':
+                tf.print('predictions:', tf.shape(predictions['logits']))
+                tf.print('targets shape:', tf.shape(data['seqClassIDs']))
                 labels = data_util.create_labels(tf.cast(data['seqClassIDs'], dtype=tf.int32),
                                                  tf.cast(data['nSeqElements'], dtype=tf.int32))
                 pred_loss = self.rnnt_loss(labels, predictions)
@@ -672,7 +678,6 @@ class NeuralSequenceDecoder(object):
                 indices=decodedStrings.indices,
                 values=decodedStrings.values-1, # TODO: should this -1 be here?
                 dense_shape=[batchSize, self.args['dataset']['maxSeqElements']])]
-            # breakpoint()
             editDistance = tf.edit_distance(tf.cast(decodedStrings[0], tf.int64),
                                             tf.cast(sparseLabels, tf.int64),
                                             normalize=False)
