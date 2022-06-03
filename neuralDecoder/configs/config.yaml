@@ -54,6 +54,7 @@ smoothKernelSD: 2
 learnRateStart: 0.01
 learnRateEnd: 0.0
 learnRateDecaySteps: 100000
+weightDecay: 0.004
 
 #can optionally specify for only the input layers to train or only the back end
 trainableInput: 1
